@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 api_key = os.getenv("api_key")
-secret_key = os.getenv("secret_key")
+api_secret = os.getenv("api_secret")
 base_url = os.getenv("base_url")
 
 # Create Alpaca client
-api = REST(api_key, secret_key, base_url)
+api = REST(api_key, api_secret, base_url)
