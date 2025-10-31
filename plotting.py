@@ -4,7 +4,8 @@ import asciichartpy as asciichart
 def plot_stock(symbol, period="1mo", interval="1d"):
 # Parameters
 
-    chart_width = 80  # constant width
+    chart_width = 50  # constant width
+    chart_height = 10  # constant height
     #Returned String of Graph
     finalstring = ""
 
@@ -27,8 +28,7 @@ def plot_stock(symbol, period="1mo", interval="1d"):
 
     # Plot chart
     config = {
-        'colors': [asciichart.green],
-        'height': 15,
+        'height': chart_height,
         'format': '{:8.2f}',
         'offset': 3
     }
@@ -44,7 +44,7 @@ def plot_stock(symbol, period="1mo", interval="1d"):
     for i in range (chart_lines[-1].find("┤")):
         label_line += " "
     #Strip off extra spaces to align with chart width
-    label_line = label_line[:-round(chart_width/11)]
+    label_line = label_line[:-round(chart_width/11.5)]
 
     # Print dates at roughly equal intervals under the chart
     num_labels = 5  # how many dates to show
@@ -57,4 +57,4 @@ def plot_stock(symbol, period="1mo", interval="1d"):
         if i == chart_width - 1:
             label_line += sampled_dates[i][:5].center(step)
     finalstring += label_line
-    print(finalstring)
+    return(finalstring)
