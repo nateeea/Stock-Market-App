@@ -3,8 +3,20 @@ import pandas as pd
 
 #Get the latest price for a given symbol
 def get_latest_price(symbol):
-    data = yf.download(symbol, period="1d", interval="1m", auto_adjust=True)
-    return float(data["Close"].iloc[-1].item())
+    try:
+        # Use Ticker.history which can be more reliable for single-symbol queries
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period="1d", interval="1m", auto_adjust=True)
+        if df is None or df.empty:
+            # fallback to download
+            df = yf.download(symbol, period="1d", interval="1m", auto_adjust=True)
+        if df is None or df.empty:
+            return None
+        # get the latest close price
+        latest = df["Close"].iloc[-1]
+        return float(latest)
+    except Exception:
+        return None
 
 #Get daily historical data for a given symbol
 def get_daily_history(symbol, period="1mo", interval="1d"):
