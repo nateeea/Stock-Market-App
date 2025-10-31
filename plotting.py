@@ -35,7 +35,6 @@ def plot_stock(symbol, period="1mo", interval="1d"):
     chart_lines = asciichart.plot(sampled_prices, config).split('\n')
 
     # Print chart with dates below
-    finalstring += (symbol + " " + period + " Chart:\n")
     for line in chart_lines:
         finalstring += line + "\n"
 
