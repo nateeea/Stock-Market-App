@@ -50,20 +50,58 @@ def plot_stock(symbol, period="1mo", interval="1d"):
     # Plot chart
     config = {
         'height': chart_height,
-        'format': '{:8.2f}',
+        'format': '{:.2f}',
         'offset': 3
     }
     chart_lines = asciichart.plot(sampled_prices, config).split('\n')
+    
+    # Find the maximum length of the price labels
+    max_label_length = 0
+    for line in chart_lines:
+        # Find where the graph starts (looking for both ┤ and ┼)
+        graph_start = -1
+        for char in ['┤', '┼']:
+            pos = line.find(char)
+            if pos != -1:
+                graph_start = pos if graph_start == -1 else min(graph_start, pos)
+        
+        if graph_start != -1:
+            # Extract the price label and find its length
+            label = line[:graph_start].strip()
+            if label and label[0].isdigit():  # Make sure it's a number
+                max_label_length = max(max_label_length, len(label))
+
+    # Right-align all lines
+    aligned_lines = []
+    for line in chart_lines:
+        # Find where the graph starts (looking for both ┤ and ┼)
+        graph_start = -1
+        for char in ['┤', '┼']:
+            pos = line.find(char)
+            if pos != -1:
+                graph_start = pos if graph_start == -1 else min(graph_start, pos)
+                
+        if graph_start != -1:
+            label = line[:graph_start].strip()
+            graph = line[graph_start:]
+            if label and label[0].isdigit():
+                # Right align the label to max_label_length
+                aligned_line = label.rjust(max_label_length) + graph
+            else:
+                # For lines without numbers, just pad with spaces
+                aligned_line = " " * max_label_length + graph
+            aligned_lines.append(aligned_line)
+        else:
+            aligned_lines.append(line)
 
     # Print chart with dates below
-    for line in chart_lines:
+    for line in aligned_lines:
         finalstring += line + "\n"
-
     # Sets the right number of spaces before the date labels
     label_line = ""
-    if chart_lines:
+    if aligned_lines:
         try:
-            end_idx = chart_lines[-1].find("┤")
+            end_idx = aligned_lines[-1].find("┤")
         except Exception:
             end_idx = 0
     else:
