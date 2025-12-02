@@ -20,12 +20,15 @@ def main(stdscr):
     INFO_H = 3
     # Keep the graph size fixed and derive the info box sizes from it
     GRAPH_H = 20
-    GRAPH_W = 75  # fixed graph width
+    DEFAULT_GRAPH_W = 75  # preferred graph width
+    STATS_W = 28  # width of the right-side stats box
     # Derive info box widths from GRAPH_W but allow wrapping to multiple rows
     delayTime = 40  # Delay for each line being printed in milliseconds
     # Call the plot_stock function to get the chart and metrics
     symbol = "BTC-USD"
-    plot, start_price, price, pct_change, period = plotting.plot_stock(symbol, period="6mo", interval="1d")
+    period = "6mo"
+    interval = "1d"
+    plot, start_price, price, pct_change, period = plotting.plot_stock(symbol, period=period, interval=interval)
     lines = plot.split("\n")
 
     # Build content strings for the info boxes
@@ -33,6 +36,12 @@ def main(stdscr):
         return [f"Ticker: {symbol}", f"Price: ${price_val:,.2f}", f"Change: {pct_val:+.2f}%", f"Period: {period}"]
 
     contents = make_contents(price, pct_change)
+
+    # determine terminal size early so compute_positions can use GRAPH_W
+    term_h, term_w = stdscr.getmaxyx()
+    # reserve space for stats box on the right plus a 1-column gap
+    max_graph_w = max(10, term_w - STATS_W - 3)
+    GRAPH_W = min(DEFAULT_GRAPH_W, max_graph_w)
 
     def compute_positions(contents):
         # minimal width for a box (including padding/borders)
@@ -65,10 +74,8 @@ def main(stdscr):
 
     positions, rows_count = compute_positions(contents)
 
-    # Ensure terminal is large enough for our computed layout
-    term_h, term_w = stdscr.getmaxyx()
-    required_h = rows_count * INFO_H + GRAPH_H
-    required_w = GRAPH_W
+    required_h = rows_count * INFO_H + GRAPH_H + 4  # extra space for input prompt
+    required_w = GRAPH_W + STATS_W + 1
     if term_h < required_h or term_w < required_w:
         stdscr.addstr(0, 0, f"Terminal too small: need {required_w}x{required_h} (WxH). Resize and retry. Press any key to exit.")
         stdscr.refresh()
@@ -83,13 +90,23 @@ def main(stdscr):
         win.box()
         info_windows[idx] = win
 
-    # graphWin placed below the info rows
+    # graphWin placed below the info rows (left side)
     graph_y = rows_count * INFO_H
     graphWin = curses.newwin(GRAPH_H, GRAPH_W, graph_y, 0)
     graphWin.box()
 
+    # stats window on the right of the graph
+    stats_x = GRAPH_W + 1
+    statsWin = curses.newwin(GRAPH_H, STATS_W, graph_y, stats_x)
+    statsWin.box()
+
+    # input prompt window below graph and stats (single row)
+    input_y = graph_y + GRAPH_H + 1
+    inputWin = curses.newwin(3, term_w, input_y, 0)
+    inputWin.box()
+
     # Helper: draw info windows and graph
-    def draw_all(current_price, current_pct, lines):
+    def draw_all(current_price, current_pct, lines, hist_df=None):
         contents = make_contents(current_price, current_pct)
         # draw info boxes
         for idx, text in enumerate(contents):
@@ -118,9 +135,47 @@ def main(stdscr):
                 except curses.error:
                     pass
         graphWin.refresh()
+        # draw stats on the right
+        statsWin.erase()
+        statsWin.box()
+        try:
+            # Basic stats
+            statsWin.addstr(1, 2, f"Symbol: {symbol}")
+            statsWin.addstr(2, 2, f"Period: {period}")
+            statsWin.addstr(3, 2, f"Start: ${start_price:,.2f}")
+            statsWin.addstr(4, 2, f"Now:   ${current_price:,.2f}")
+            color = curses.color_pair(1) if current_pct >= 0 else curses.color_pair(2)
+            statsWin.addstr(5, 2, f"Change: {current_pct:+.2f}%", color)
+            # If history dataframe provided, show high/low/volume
+            if hist_df is not None and not hist_df.empty:
+                try:
+                    high = hist_df['High'].max()
+                    low = hist_df['Low'].min()
+                    vol = int(hist_df['Volume'].iloc[-1]) if 'Volume' in hist_df.columns else None
+                    statsWin.addstr(7, 2, f"High: ${high:,.2f}")
+                    statsWin.addstr(8, 2, f"Low:  ${low:,.2f}")
+                    if vol is not None:
+                        statsWin.addstr(9, 2, f"Vol: {vol:,}")
+                except Exception:
+                    pass
+        except curses.error:
+            pass
+        statsWin.refresh()
+
+    # Try to load history for stats
+    try:
+        hist_df = data.get_daily_history(symbol, period=period, interval=interval)
+    except Exception:
+        hist_df = None
 
     # Initial draw
-    draw_all(price, pct_change, lines)
+    draw_all(price, pct_change, lines, hist_df)
+    # Input hint
+    try:
+        inputWin.addstr(1, 2, "Press 's' to change symbol/period, 'q' to quit.")
+        inputWin.refresh()
+    except curses.error:
+        pass
 
     # Now enter an update loop: poll for latest price every 5 seconds and update boxes
     stdscr.nodelay(True)
@@ -130,8 +185,57 @@ def main(stdscr):
         while True:
             ch = stdscr.getch()
             if ch != -1:
-                # any key pressed -> exit
-                break
+                # handle keys: 'q' to quit, 's' to change symbol/period
+                if ch in (ord('q'), ord('Q')):
+                    break
+                if ch in (ord('s'), ord('S')):
+                    # prompt user for new symbol and period
+                    curses.echo()
+                    curses.curs_set(1)
+                    inputWin.erase()
+                    inputWin.box()
+                    prompt = "Enter SYMBOL [PERIOD] (e.g. AAPL 3mo). Blank to cancel: "
+                    try:
+                        inputWin.addstr(1, 2, prompt)
+                        inputWin.refresh()
+                        # getstr with max length
+                        user_input = inputWin.getstr(1, 2 + len(prompt), 32).decode().strip()
+                    except Exception:
+                        user_input = ''
+                    curses.noecho()
+                    curses.curs_set(0)
+                    # restore input window box
+                    inputWin.erase()
+                    inputWin.box()
+                    inputWin.addstr(1, 2, "Press 's' to change symbol/period, 'q' to quit.")
+                    inputWin.refresh()
+
+                    if user_input:
+                        parts = user_input.split()
+                        new_symbol = parts[0]
+                        new_period = parts[1] if len(parts) > 1 else period
+                        # attempt to reload plot and history
+                        try:
+                            new_plot, new_start, new_price, new_pct, new_period = plotting.plot_stock(new_symbol, period=new_period, interval=interval)
+                            symbol = new_symbol
+                            period = new_period
+                            start_price = new_start
+                            price = new_price
+                            pct_change = new_pct
+                            lines = new_plot.split('\n')
+                            try:
+                                hist_df = data.get_daily_history(symbol, period=period, interval=interval)
+                            except Exception:
+                                hist_df = None
+                            draw_all(price, pct_change, lines, hist_df)
+                        except Exception:
+                            # ignore invalid symbol/period and continue
+                            pass
+                    last_update = time.time()
+                    continue
+                # any other key: ignore
+                else:
+                    pass
 
             now = time.time()
             if now - last_update >= UPDATE_INTERVAL:
@@ -159,8 +263,8 @@ def main(stdscr):
                         positions, rows_count = compute_positions(new_contents)
                         # check terminal size
                         term_h, term_w = stdscr.getmaxyx()
-                        required_h = rows_count * INFO_H + GRAPH_H
-                        required_w = GRAPH_W
+                        required_h = rows_count * INFO_H + GRAPH_H + 4
+                        required_w = GRAPH_W + STATS_W + 1
                         if term_h < required_h or term_w < required_w:
                             # can't relayout due to terminal size; skip update
                             last_update = now
@@ -178,6 +282,15 @@ def main(stdscr):
                         graph_y = rows_count * INFO_H
                         graphWin = curses.newwin(GRAPH_H, GRAPH_W, graph_y, 0)
                         graphWin.box()
+
+                        # recreate stats and input windows
+                        stats_x = GRAPH_W + 1
+                        statsWin = curses.newwin(GRAPH_H, STATS_W, graph_y, stats_x)
+                        statsWin.box()
+
+                        input_y = graph_y + GRAPH_H + 1
+                        inputWin = curses.newwin(3, term_w, input_y, 0)
+                        inputWin.box()
 
                         # redraw everything
                         draw_all(price, pct_change, lines)
